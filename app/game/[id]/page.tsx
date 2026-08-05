@@ -11,7 +11,6 @@ const GAME_CATEGORIES = ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek'
 
 export default function GamePage() {
   const { id } = useParams()
-  const router = useRouter()
   const supabase = createClient()
   
   const containerRef = useRef<HTMLDivElement>(null)
@@ -76,7 +75,7 @@ export default function GamePage() {
         }
         else {
            // Round ended, push to results
-           router.push(`/game/${id}/results`)
+           window.location.href = `/game/${id}/results`
         }
       }
     }
@@ -94,7 +93,7 @@ export default function GamePage() {
         { event: 'UPDATE', schema: 'public', table: 'rounds', filter: `id=eq.${round.id}` },
         (payload) => {
           if (payload.new.ended_at !== null) {
-            router.push(`/game/${id}/results`)
+            window.location.href = `/game/${id}/results`
           }
         }
       )
@@ -182,7 +181,11 @@ export default function GamePage() {
           })
         }
         if (inserts.length > 0) {
-          await supabase.from('answers').insert(inserts)
+          const { error } = await supabase.from('answers').insert(inserts)
+          if (error) {
+            toast.error('Cevaplar kaydedilirken hata: ' + error.message)
+            console.error('Answer insert error:', error)
+          }
         }
       }
 

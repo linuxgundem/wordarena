@@ -101,19 +101,13 @@ export default function ResultsPage() {
     fetchResults()
   }, [id, router, supabase])
 
-  // Realtime subscription for next round start
+  // Realtime: Eğer kurucu yeni tur başlatırsa, herkesi otomatik yönlendir
   useEffect(() => {
     if (!game) return
     const channel = supabase.channel(`game:${game.id}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'rounds', filter: `game_id=eq.${game.id}` },
-        (payload) => {
-          // Yeni tur eklendi, oyuna dön!
-          toast.success('Yeni tur başlıyor!')
-          router.push(`/game/${id}`)
-        }
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'rounds', filter: `game_id=eq.${game.id}` }, () => {
+        window.location.href = `/game/${id}`
+      })
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${id}` },
