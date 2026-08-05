@@ -162,7 +162,13 @@ export default function LobbyPage() {
             </p>
           </div>
           <div className="flex space-x-3">
-            <button className="flex items-center px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl transition-colors text-sm font-medium">
+            <button 
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href)
+                toast.success('Oda linki kopyalandı! Arkadaşlarınıza gönderebilirsiniz.')
+              }}
+              className="flex items-center px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded-xl transition-colors text-sm font-medium"
+            >
               <UserPlus className="w-4 h-4 mr-2" /> Davet Et
             </button>
             <button 
