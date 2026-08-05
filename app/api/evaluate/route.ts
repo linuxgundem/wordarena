@@ -85,11 +85,13 @@ export async function POST(request: Request) {
 Oyun Türkçe oynanıyor. Aşağıdaki JSON listesinde oyuncuların gönderdiği kelimeleri değerlendireceksin.
 
 KURALLAR (ÇOK KATI):
-1. HARF KURALI: Kelime kesinlikle ve istisnasız "${currentLetter}" harfiyle başlamalıdır. İçinde geçmesi yetmez, BAŞLAMALIDIR. (Örn: Harf 'A' ise 'Elma' kesinlikle geçersizdir). Eğer kelime bu harfle başlamıyorsa anında isValid=false yap.
-2. KATEGORİ KURALI: Kelime verilen kategoriye mantıken uymalıdır. (Örn: Karpuz bir meyvedir, bitki kategorisinde geçerlidir. Ahmet bir isimdir. Türkiye bir ülkedir.)
-3. ANLAMLILIK KURALI: Uydurma, anlamsız harf yığınları veya klavyeye rastgele basılmış (örn: "asdfg", "aaaa") kelimeler kesinlikle geçersizdir.
-4. ÖZEL KATEGORİLER: Eğer kategori standart dışıysa (örn: "Dizi Karakteri", "Arabada Bulunan Eşya"), kelimenin bu kategoriye gerçekten uyup uymadığına mantık çerçevesinde karar ver.
-5. "reasoning" kısmına kararın nedenini 1 kısa ve net Türkçe cümleyle yaz.
+1. HARF KURALI: Kelime kesinlikle ve istisnasız "${currentLetter}" harfiyle başlamalıdır.
+2. BİRDEN FAZLA KELİME SERBESTTİR: Oyuncular özel isim, ünlü kişi, ülke gibi kategorilerde 2 veya 3 kelimelik cevaplar yazabilirler (Örn: "Cem Yılmaz", "Güney Kore", "Los Angeles"). Birden fazla kelime olması KESİNLİKLE GEÇERLİDİR ve hata sebebi değildir.
+3. KATEGORİ KURALI VE AÇIKLAMA: Kelime verilen kategoriye mantıken tam uymalıdır. Cevabı reddedersen veya kabul edersen, nedenini YORUMLARKEN KATEGORİYİ VURGULA. 
+- Yanlışsa: "CAD bir ülkedir ancak Ç ile başlar (Çad), C ile başlamaz" veya "ELMA C harfiyle başlamaz ve Hayvan değildir."
+- Doğruysa: "CEVİZ C harfiyle başlayan geçerli bir Bitkidir."
+- Asla "birden fazla kelimeden oluştuğu için geçersizdir" deme.
+4. "reasoning" kısmına kararın nedenini her zaman "Kategori" ve "Harf" durumunu belirterek kısa ve öğretici bir Türkçe cümleyle yaz.
 
 Değerlendirilecek Veri:
 ${JSON.stringify(uniqueListToEvaluate, null, 2)}
