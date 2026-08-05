@@ -162,7 +162,7 @@ export default function GamePage() {
   const submitData = useCallback(async () => {
     if (gameState !== 'playing') return
     setGameState('submitting')
-    toast.success('Cevaplar gönderiliyor...')
+    toast.success('Cevaplarınız kaydedildi, diğer oyuncular ve süre bekleniyor...')
     
     try {
       const inserts = []
@@ -183,59 +183,65 @@ export default function GamePage() {
           console.error('Answer insert error:', error)
         }
       }
-
-      setGameState('evaluating')
-      
-      // If Host, trigger evaluation API but give a solid grace period for slow connections
-      if (room && currentUser && room.owner_id === currentUser.id) {
-        setTimeout(async () => {
-          try {
-             await fetch('/api/evaluate', {
-               method: 'POST',
-               headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({ roundId: round.id, roomId: room.id })
-             })
-          } catch (err: any) {
-             toast.error('Değerlendirme hatası: ' + err.message)
-          }
-        }, 6000) // 6 saniye bekle ki diğer oyuncular verilerini kesin kaydetsin
-      }
     } catch(err: any) {
       toast.error(err.message)
     }
-  }, [gameState, round, answers, room, currentUser])
+  }, [gameState, round, answers, currentUser, supabase])
 
-  // Oyun Döngüsü (Bağıl zaman tabanlı tam senkronizasyon - sekme uykuya dalsa bile etkilenmez)
+  // Oyun Döngüsü
   useEffect(() => {
-    if (!round || !room || !localStartTime || gameState === 'submitting' || gameState === 'evaluating') return
+    if (!round || !room || !localStartTime || gameState === 'evaluating') return
 
     const gameDurationMs = room.round_time * 1000
-    const startDelayMs = 5000 // 5 saniye bekleme
+    const startDelayMs = 5000 
     
     const interval = setInterval(() => {
       const now = Date.now()
       const elapsed = now - localStartTime
       
-      // 1. Bekleme Süresi (Starting)
       if (elapsed < startDelayMs) {
-        setGameState('starting')
+        if (gameState !== 'starting') setGameState('starting')
         setCountdown(Math.ceil((startDelayMs - elapsed) / 1000))
       } 
-      // 2. Oyun Süresi (Playing)
       else if (elapsed < startDelayMs + gameDurationMs) {
-        setGameState('playing')
+        if (gameState === 'starting') setGameState('playing')
         setTimeLeft(Math.ceil((startDelayMs + gameDurationMs - elapsed) / 1000))
       } 
-      // 3. Süre Bitti (Submitting)
       else {
+        // SÜRE BİTTİ
         clearInterval(interval)
         setTimeLeft(0)
-        submitData()
+        
+        // Eğer kullanıcı henüz göndermediyse otomatik gönder
+        if (gameState === 'playing') {
+          submitData()
+        }
+
+        setGameState('evaluating')
+
+        // Kurucu, tüm veriler kaydolduktan 5 saniye sonra yapay zekayı tetikler
+        if (room && currentUser && room.owner_id === currentUser.id) {
+          setTimeout(async () => {
+            try {
+               await fetch('/api/evaluate', {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ 
+                   roundId: round.id, 
+                   roomId: room.id,
+                   customCategories: room.custom_categories || ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
+                 })
+               })
+            } catch (err: any) {
+               toast.error('Değerlendirme hatası: ' + err.message)
+            }
+          }, 5000)
+        }
       }
     }, 500)
 
     return () => clearInterval(interval)
-  }, [round, room, gameState, localStartTime, submitData])
+  }, [round, room, gameState, localStartTime, submitData, currentUser])
 
   const handleInputChange = (category: string, value: string) => {
     setAnswers(prev => ({
@@ -355,10 +361,10 @@ export default function GamePage() {
       {(gameState === 'submitting' || gameState === 'evaluating') && (
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6" />
-          <h2 className="text-2xl font-bold">
-            {gameState === 'submitting' ? 'Cevaplar İletiliyor...' : 'Yapay Zeka Değerlendiriyor...'}
+          <h2 className="text-2xl font-bold text-center px-4">
+            {gameState === 'submitting' ? 'Cevaplar Kaydedildi.\nDiğer Oyuncular ve Sürenin Bitmesi Bekleniyor...' : 'Süre Bitti!\nYapay Zeka Değerlendiriyor...'}
           </h2>
-          <p className="text-neutral-400 mt-2">Bu işlem birkaç saniye sürebilir, lütfen bekleyin.</p>
+          <p className="text-neutral-400 mt-2">Bu işlem birkaç saniye sürebilir, lütfen sekmeden ayrılmayın.</p>
         </div>
       )}
     </div>
