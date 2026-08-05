@@ -73,11 +73,17 @@ export default function RoomConfigModal({ isOpen, onClose }: RoomConfigModalProp
     // Şimdilik sadece oda ID'sini alıp lobiye yönlendiriyoruz)
 
     // 2. Sahibi oyuncu olarak odaya ekle
-    await supabase.from('room_players').insert({
+    const { error: joinError } = await supabase.from('room_players').insert({
       room_id: room.id,
       profile_id: user.id,
       is_ready: false
     })
+
+    if (joinError) {
+      toast.error('Odaya katılırken hata oluştu: ' + joinError.message)
+      setLoading(false)
+      return
+    }
 
     toast.success('Oda kuruldu!')
     router.push(`/room/${room.id}`)
