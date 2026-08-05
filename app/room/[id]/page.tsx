@@ -63,6 +63,43 @@ export default function LobbyPage() {
       }
       setRoom(roomData)
 
+      // Katılımcıyı odaya ekle (eğer daha önce eklenmemişse)
+      const { data: existingPlayer } = await supabase
+        .from('room_players')
+        .select('id')
+        .eq('room_id', id)
+        .eq('profile_id', user.id)
+        .maybeSingle()
+
+      if (!existingPlayer) {
+        // Oda kapasitesini kontrol et
+        const { count } = await supabase
+          .from('room_players')
+          .select('id', { count: 'exact', head: true })
+          .eq('room_id', id)
+          
+        if (count !== null && count >= roomData.max_players) {
+           toast.error('Oda dolu!')
+           router.push('/')
+           return
+        }
+
+        // Oyuncuyu ekle
+        const { error: joinError } = await supabase
+          .from('room_players')
+          .insert({
+            room_id: id,
+            profile_id: user.id,
+            is_ready: false
+          })
+        
+        if (joinError) {
+           toast.error('Odaya katılırken hata oluştu: ' + joinError.message)
+        } else {
+           toast.success('Odaya katıldınız!')
+        }
+      }
+
       // Fetch Players
       fetchPlayers()
       
