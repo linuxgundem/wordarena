@@ -53,31 +53,52 @@ export async function POST(request: Request) {
       return NextResponse.json({ status: 'round_evaluated' })
     }
 
-    // 3. Gemini Prompt'u Hazırla
+    // 3. Benzersiz cevapları grupla (Gemini aynı cevapları tekrar tekrar değerlendirmesin diye)
+    const uniqueAnswersMap: Record<string, { cat: string, ans: string, ids: string[], profileIds: string[] }> = {}
+    
+    for (const a of answers) {
+      const catName = (a.categories as any)?.name || 'Bilinmeyen'
+      const text = a.answer_text || ''
+      const key = `${catName}:::${text}`
+      
+      if (!uniqueAnswersMap[key]) {
+        uniqueAnswersMap[key] = { cat: catName, ans: text, ids: [], profileIds: [] }
+      }
+      uniqueAnswersMap[key].ids.push(a.id)
+      if (!uniqueAnswersMap[key].profileIds.includes(a.profile_id)) {
+        uniqueAnswersMap[key].profileIds.push(a.profile_id)
+      }
+    }
+
+    const uniqueListToEvaluate = Object.values(uniqueAnswersMap).map((u, idx) => ({
+      evalId: idx.toString(),
+      cat: u.cat,
+      ans: u.ans
+    }))
+
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) return NextResponse.json({ error: 'GEMINI_API_KEY eksik.' }, { status: 500 })
 
     const ai = new GoogleGenAI({ apiKey })
 
     const prompt = `Sen bir İsim-Şehir oyunu hakemisin. Geçerli harf: "${currentLetter}".
-Oyun Türkçe oynanıyor. Aşağıdaki JSON listesinde oyuncuların verdiği cevaplar var.
+Oyun Türkçe oynanıyor. Aşağıdaki JSON listesinde gönderilen HER BİR cevabı değerlendir.
+
 Kurallar:
-1. Kelime verilen "${currentLetter}" harfiyle başlamalıdır. (Tolerans gösterme)
+1. Kelime kesinlikle "${currentLetter}" harfiyle başlamalıdır. (Tolerans gösterme)
 2. Kelime verilen kategoriye uygun olmalıdır (Örn: Karpuz bir meyvedir, bitki kategorisinde 10 puan sayılır. Kasiyer meslektir vb.)
 3. Mantıksız, harfle başlamayan veya uydurma kelimeler için isValid=false, geçerliyse isValid=true yap.
 4. "reasoning" kısmında nedenini (1 kısa cümle) Türkçe açıkla.
+5. Gönderilen listedeki HİÇBİR evalId'yi atlamadan hepsi için sonuç üret.
 
-Gelen Veri:
-${JSON.stringify(answers.map(a => {
-  const cat = a.categories as any
-  return { id: a.id, cat: cat?.name, ans: a.answer_text }
-}), null, 2)}
+Değerlendirilecek Veri:
+${JSON.stringify(uniqueListToEvaluate, null, 2)}
 
-SADECE ŞU JSON FORMATINDA YANIT VER, BAŞKA HİÇBİR YAZI EKLEME:
+SADECE ŞU JSON FORMATINDA YANIT VER:
 {
   "results": [
     {
-      "id": "cevap_id",
+      "evalId": "0",
       "isValid": true,
       "reasoning": "Açıklama"
     }
@@ -95,47 +116,42 @@ SADECE ŞU JSON FORMATINDA YANIT VER, BAŞKA HİÇBİR YAZI EKLEME:
     const cleanedResponse = rawResponse.replace(/\`\`\`json/g, '').replace(/\`\`\`/g, '').trim()
     const evaluation = JSON.parse(cleanedResponse)
 
-    // 4. Puanları Hesapla
+    // 4. Puanları Hesapla ve Dağıt
     const reviews = []
-    const validAnswersMap: Record<string, string[]> = {}
-
-    for (const res of evaluation.results) {
-      const answer = answers.find(a => a.id === res.id)
-      if (!answer) continue
-
-      if (res.isValid) {
-        const cat = answer.categories as any
-        const key = `${cat?.name}:${answer.answer_text}`
-        if (!validAnswersMap[key]) validAnswersMap[key] = []
-        validAnswersMap[key].push(answer.profile_id)
-      }
-    }
-
     const playerScores: Record<string, number> = {}
 
     for (const res of evaluation.results) {
-      const answer = answers.find(a => a.id === res.id)
-      if (!answer) continue
+      const u = uniqueListToEvaluate.find(x => x.evalId === res.evalId)
+      if (!u) continue
+
+      const key = `${u.cat}:::${u.ans}`
+      const group = uniqueAnswersMap[key]
+      if (!group) continue
 
       let points = 0
       if (res.isValid) {
-        const cat = answer.categories as any
-        const key = `${cat?.name}:${answer.answer_text}`
-        const count = validAnswersMap[key] ? validAnswersMap[key].length : 0
-        
-        if (count === 1) points = 10
-        else points = 5
+        // Kaç FARKLI oyuncu aynı cevabı vermiş?
+        const distinctPlayersCount = group.profileIds.length
+        points = distinctPlayersCount === 1 ? 10 : 5
       }
 
-      reviews.push({
-        answer_id: res.id,
-        is_valid: res.isValid,
-        reasoning: res.reasoning,
-        points_awarded: points
-      })
+      // Bu gruba (aynı kelimeye) ait tüm cevaplar (answer_id) için aynı yorumu kaydet
+      for (const answerId of group.ids) {
+        reviews.push({
+          answer_id: answerId,
+          is_valid: res.isValid,
+          reasoning: res.reasoning,
+          points_awarded: points
+        })
+      }
 
-      if (!playerScores[answer.profile_id]) playerScores[answer.profile_id] = 0
-      playerScores[answer.profile_id] += points
+      // Oyuncuların toplam puanlarını topla
+      for (const answer of answers) {
+         if (group.ids.includes(answer.id) && res.isValid) {
+            if (!playerScores[answer.profile_id]) playerScores[answer.profile_id] = 0
+            playerScores[answer.profile_id] += points
+         }
+      }
     }
 
     // 5. Veritabanına Kaydet
