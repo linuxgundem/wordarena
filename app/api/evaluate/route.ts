@@ -81,15 +81,15 @@ export async function POST(request: Request) {
 
     const ai = new GoogleGenAI({ apiKey })
 
-    const prompt = `Sen bir İsim-Şehir oyunu hakemisin. Geçerli harf: "${currentLetter}".
-Oyun Türkçe oynanıyor. Aşağıdaki JSON listesinde gönderilen HER BİR cevabı değerlendir.
+    const prompt = `Sen katı ve acımasız bir İsim-Şehir oyunu hakemisin. Geçerli harf: "${currentLetter}".
+Oyun Türkçe oynanıyor. Aşağıdaki JSON listesinde oyuncuların gönderdiği kelimeleri değerlendireceksin.
 
-Kurallar:
-1. Kelime kesinlikle "${currentLetter}" harfiyle başlamalıdır. (Tolerans gösterme)
-2. Kelime verilen kategoriye uygun olmalıdır (Örn: Karpuz bir meyvedir, bitki kategorisinde 10 puan sayılır. Kasiyer meslektir vb.)
-3. Mantıksız, harfle başlamayan veya uydurma kelimeler için isValid=false, geçerliyse isValid=true yap.
-4. "reasoning" kısmında nedenini (1 kısa cümle) Türkçe açıkla.
-5. Gönderilen listedeki HİÇBİR evalId'yi atlamadan hepsi için sonuç üret.
+KURALLAR (ÇOK KATI):
+1. HARF KURALI: Kelime kesinlikle ve istisnasız "${currentLetter}" harfiyle başlamalıdır. İçinde geçmesi yetmez, BAŞLAMALIDIR. (Örn: Harf 'A' ise 'Elma' kesinlikle geçersizdir). Eğer kelime bu harfle başlamıyorsa anında isValid=false yap.
+2. KATEGORİ KURALI: Kelime verilen kategoriye mantıken uymalıdır. (Örn: Karpuz bir meyvedir, bitki kategorisinde geçerlidir. Ahmet bir isimdir. Türkiye bir ülkedir.)
+3. ANLAMLILIK KURALI: Uydurma, anlamsız harf yığınları veya klavyeye rastgele basılmış (örn: "asdfg", "aaaa") kelimeler kesinlikle geçersizdir.
+4. ÖZEL KATEGORİLER: Eğer kategori standart dışıysa (örn: "Dizi Karakteri", "Arabada Bulunan Eşya"), kelimenin bu kategoriye gerçekten uyup uymadığına mantık çerçevesinde karar ver.
+5. "reasoning" kısmına kararın nedenini 1 kısa ve net Türkçe cümleyle yaz.
 
 Değerlendirilecek Veri:
 ${JSON.stringify(uniqueListToEvaluate, null, 2)}

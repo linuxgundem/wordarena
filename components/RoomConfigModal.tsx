@@ -25,6 +25,20 @@ export default function RoomConfigModal({ isOpen, onClose }: RoomConfigModalProp
   // Örnek kategoriler, veritabanından da çekilebilir
   const defaultCategories = ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
   const [selectedCategories, setSelectedCategories] = useState<string[]>(defaultCategories)
+  const [customCategoryInput, setCustomCategoryInput] = useState('')
+
+  const handleAddCustomCategory = (e: React.FormEvent | React.KeyboardEvent) => {
+    if ('key' in e && e.key !== 'Enter') return
+    e.preventDefault()
+    
+    const cat = customCategoryInput.trim()
+    if (cat && !selectedCategories.includes(cat) && !defaultCategories.includes(cat)) {
+      setSelectedCategories(prev => [...prev, cat])
+    } else if (cat && defaultCategories.includes(cat) && !selectedCategories.includes(cat)) {
+      setSelectedCategories(prev => [...prev, cat])
+    }
+    setCustomCategoryInput('')
+  }
 
   const toggleCategory = (cat: string) => {
     setSelectedCategories(prev => 
@@ -59,6 +73,7 @@ export default function RoomConfigModal({ isOpen, onClose }: RoomConfigModalProp
         is_private: isPrivate,
         password: isPrivate ? password : null,
         ai_referee_enabled: aiEnabled,
+        custom_categories: selectedCategories
       })
       .select()
       .single()
@@ -226,22 +241,41 @@ export default function RoomConfigModal({ isOpen, onClose }: RoomConfigModalProp
                 <label className="block text-sm font-medium text-neutral-300 mb-3">
                   Kategoriler <span className="text-neutral-500 font-normal">({selectedCategories.length} seçili)</span>
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {defaultCategories.map(cat => (
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {selectedCategories.map(cat => (
                     <button
                       key={cat}
                       onClick={() => toggleCategory(cat)}
-                      className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${
-                        selectedCategories.includes(cat)
-                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
-                          : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white'
-                      }`}
+                      className="px-4 py-2 rounded-full text-sm font-medium transition-all bg-blue-600 text-white shadow-lg shadow-blue-500/20"
                     >
-                      {cat}
+                      {cat} <X className="inline-block w-3 h-3 ml-1" />
                     </button>
                   ))}
-                  <button className="px-4 py-2 rounded-full text-sm font-medium bg-neutral-800 border border-dashed border-neutral-600 text-neutral-400 hover:text-white transition-all">
-                    + Özel Ekle
+                  {defaultCategories.filter(c => !selectedCategories.includes(c)).map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => toggleCategory(cat)}
+                      className="px-4 py-2 rounded-full text-sm font-medium transition-all bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white"
+                    >
+                      + {cat}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="flex gap-2">
+                  <input 
+                    type="text" 
+                    value={customCategoryInput}
+                    onChange={(e) => setCustomCategoryInput(e.target.value)}
+                    onKeyDown={handleAddCustomCategory}
+                    placeholder="Özel kategori yaz ve Enter'a bas..."
+                    className="flex-1 bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-2 text-sm text-white placeholder-neutral-500 focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button 
+                    onClick={handleAddCustomCategory}
+                    className="px-4 py-2 bg-neutral-700 hover:bg-neutral-600 rounded-xl text-sm font-medium text-white transition-colors"
+                  >
+                    Ekle
                   </button>
                 </div>
               </div>

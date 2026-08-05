@@ -7,8 +7,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { Timer, AlertTriangle, Send } from 'lucide-react'
 
-const GAME_CATEGORIES = ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
-
 export default function GamePage() {
   const { id } = useParams()
   const router = useRouter()
@@ -167,26 +165,22 @@ export default function GamePage() {
     toast.success('Cevaplar gönderiliyor...')
     
     try {
-      // Get categories
-      const { data: categories } = await supabase.from('categories').select('id, name')
-      if (categories) {
-        const inserts = []
-        for (const [catName, answerText] of Object.entries(answers)) {
-          const category = categories.find(c => c.name === catName)
-          if (!category || !answerText.trim()) continue
-          inserts.push({
-            round_id: round.id,
-            profile_id: currentUser.id,
-            category_id: category.id,
-            answer_text: answerText.trim().toUpperCase()
-          })
-        }
-        if (inserts.length > 0) {
-          const { error } = await supabase.from('answers').insert(inserts)
-          if (error) {
-            toast.error('Cevaplar kaydedilirken hata: ' + error.message)
-            console.error('Answer insert error:', error)
-          }
+      const inserts = []
+      for (const [catName, answerText] of Object.entries(answers)) {
+        if (!answerText.trim()) continue
+        inserts.push({
+          round_id: round.id,
+          profile_id: currentUser.id,
+          category_name: catName,
+          answer_text: answerText.trim().toUpperCase()
+        })
+      }
+      
+      if (inserts.length > 0) {
+        const { error } = await supabase.from('answers').insert(inserts)
+        if (error) {
+          toast.error('Cevaplar kaydedilirken hata: ' + error.message)
+          console.error('Answer insert error:', error)
         }
       }
 
@@ -319,10 +313,10 @@ export default function GamePage() {
           </div>
 
           <div className="flex-1 overflow-y-auto custom-scrollbar">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {GAME_CATEGORIES.map((cat, index) => (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {(room?.custom_categories || ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']).map((cat: string, index: number) => (
                 <motion.div 
-                  initial={{ opacity: 0, y: 20 }}
+                  initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: index * 0.1 }}
                   key={cat} 
