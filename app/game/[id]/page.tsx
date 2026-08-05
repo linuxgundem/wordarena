@@ -1,13 +1,13 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { Timer, AlertTriangle, Send } from 'lucide-react'
+import { submitAnswersAction, evaluateRoundAction } from '@/app/actions/gameActions'
 
-// Dummy categories for the UI
 const GAME_CATEGORIES = ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
 
 export default function GamePage() {
@@ -18,14 +18,90 @@ export default function GamePage() {
   const containerRef = useRef<HTMLDivElement>(null)
   
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [countdown, setCountdown] = useState(5) // Başlangıç geri sayımı
-  const [gameState, setGameState] = useState<'starting' | 'playing' | 'submitting'>('starting')
-  const [timeLeft, setTimeLeft] = useState(60) // Oda ayarlarından gelecek, şimdilik 60
-  const [currentLetter, setCurrentLetter] = useState('K')
+  const [countdown, setCountdown] = useState(5)
+  const [gameState, setGameState] = useState<'starting' | 'playing' | 'submitting' | 'evaluating'>('starting')
+  const [timeLeft, setTimeLeft] = useState(60)
+  
+  const [room, setRoom] = useState<any>(null)
+  const [game, setGame] = useState<any>(null)
+  const [round, setRound] = useState<any>(null)
+  const [currentUser, setCurrentUser] = useState<any>(null)
+  
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [cheatWarnings, setCheatWarnings] = useState(0)
 
-  // 1. Fullscreen API Entegrasyonu
+  // Initialization
+  useEffect(() => {
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+        return
+      }
+      setCurrentUser(user)
+
+      // Get Room
+      const { data: roomData } = await supabase.from('rooms').select('*').eq('id', id).single()
+      if (roomData) {
+        setRoom(roomData)
+        setTimeLeft(roomData.round_time)
+      }
+
+      // Get Active Game
+      const { data: gameData } = await supabase
+        .from('games')
+        .select('*')
+        .eq('room_id', id)
+        .eq('status', 'in_progress')
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .single()
+        
+      if (gameData) setGame(gameData)
+
+      // Get Active Round
+      if (gameData) {
+        const { data: roundData } = await supabase
+          .from('rounds')
+          .select('*')
+          .eq('game_id', gameData.id)
+          .is('ended_at', null)
+          .order('round_number', { ascending: false })
+          .limit(1)
+          .single()
+        
+        if (roundData) setRound(roundData)
+        else {
+           // Round ended, push to results
+           router.push(`/game/${id}/results`)
+        }
+      }
+    }
+    
+    init()
+  }, [id, router, supabase])
+
+  // Realtime subscription to Rounds (To know when evaluation is done)
+  useEffect(() => {
+    if (!round) return
+    
+    const channel = supabase.channel(`round:${round.id}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'rounds', filter: `id=eq.${round.id}` },
+        (payload) => {
+          if (payload.new.ended_at !== null) {
+            router.push(`/game/${id}/results`)
+          }
+        }
+      )
+      .subscribe()
+
+    return () => { supabase.removeChannel(channel) }
+  }, [round, id, router, supabase])
+
+
+  // Fullscreen Entegrasyonu
   const enterFullscreen = async () => {
     try {
       if (containerRef.current && !document.fullscreenElement) {
@@ -37,32 +113,27 @@ export default function GamePage() {
     }
   }
 
-  // 2. Anti Hile Sistemleri (Visibility & Blur)
+  // Anti Hile Sistemleri
   useEffect(() => {
     if (gameState !== 'playing') return
-
     const handleVisibilityChange = () => {
       if (document.hidden) {
         setCheatWarnings(prev => prev + 1)
         toast.error('Uyarı: Sekme değiştirdiniz!', { icon: '⚠️', duration: 3000 })
       }
     }
-
     const handleBlur = () => {
       setCheatWarnings(prev => prev + 1)
       toast.error('Uyarı: Odak kayboldu (Pencere değişti)!', { icon: '⚠️', duration: 3000 })
     }
-
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
         setIsFullscreen(false)
         toast.error('Tam ekrandan çıkmak yasaktır! Lütfen geri dönün.', { duration: 4000 })
-        // Oyundan atma mantığı eklenebilir
       } else {
         setIsFullscreen(true)
       }
     }
-
     const handleCopyPaste = (e: ClipboardEvent) => {
       e.preventDefault()
       toast.error('Kopyala/Yapıştır yapmak yasaktır!')
@@ -83,8 +154,36 @@ export default function GamePage() {
     }
   }, [gameState])
 
-  // 3. Oyun Döngüsü
+  // Submit Logic
+  const submitData = useCallback(async () => {
+    if (gameState !== 'playing') return
+    setGameState('submitting')
+    toast.success('Cevaplar gönderiliyor...')
+    
+    try {
+      await submitAnswersAction(round.id, answers)
+      setGameState('evaluating')
+      
+      // If Host, trigger evaluation after a short delay to let others submit
+      if (room && currentUser && room.owner_id === currentUser.id) {
+        setTimeout(async () => {
+          try {
+             await evaluateRoundAction(round.id, room.id)
+             // The realtime subscription will redirect everyone
+          } catch (err: any) {
+             toast.error('Değerlendirme hatası: ' + err.message)
+          }
+        }, 3000)
+      }
+    } catch(err: any) {
+      toast.error(err.message)
+    }
+  }, [gameState, round, answers, room, currentUser])
+
+  // Oyun Döngüsü
   useEffect(() => {
+    if (!round) return
+
     if (gameState === 'starting') {
       if (countdown > 0) {
         const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
@@ -99,26 +198,16 @@ export default function GamePage() {
         const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000)
         return () => clearTimeout(timer)
       } else {
-        handleSubmit() // Süre bittiğinde otomatik gönder
+        submitData()
       }
     }
-  }, [countdown, gameState, timeLeft])
+  }, [countdown, gameState, timeLeft, round, submitData])
 
   const handleInputChange = (category: string, value: string) => {
     setAnswers(prev => ({
       ...prev,
       [category]: value
     }))
-  }
-
-  const handleSubmit = async () => {
-    setGameState('submitting')
-    toast.success('Cevaplar gönderiliyor...')
-    
-    // Gerçek API çağrısı ve Gemini entegrasyonu (7. Aşama) burada yapılacak
-    setTimeout(() => {
-      router.push(`/game/${id}/results`)
-    }, 2000)
   }
 
   if (!isFullscreen && gameState === 'starting') {
@@ -141,8 +230,6 @@ export default function GamePage() {
 
   return (
     <div ref={containerRef} className="min-h-screen bg-neutral-950 text-white overflow-hidden flex flex-col">
-      
-      {/* 1. Başlangıç Geri Sayımı */}
       <AnimatePresence>
         {gameState === 'starting' && isFullscreen && (
           <motion.div 
@@ -163,19 +250,16 @@ export default function GamePage() {
         )}
       </AnimatePresence>
 
-      {/* 2. Oyun Ekranı */}
-      {gameState === 'playing' && (
+      {gameState === 'playing' && round && room && (
         <div className="flex-1 flex flex-col max-w-4xl w-full mx-auto p-4 md:p-8 h-full">
-          
-          {/* Header Bar */}
           <div className="flex justify-between items-center bg-neutral-900/50 backdrop-blur-xl border border-neutral-800 rounded-2xl p-4 md:p-6 mb-8 shadow-2xl">
             <div className="flex items-center space-x-4">
               <div className="w-16 h-16 bg-blue-600 rounded-xl flex items-center justify-center shadow-[0_0_30px_rgba(37,99,235,0.5)]">
-                <span className="text-4xl font-black text-white">{currentLetter}</span>
+                <span className="text-4xl font-black text-white">{round.letter}</span>
               </div>
               <div>
                 <p className="text-sm text-blue-400 font-bold uppercase tracking-wider">Geçerli Harf</p>
-                <p className="text-2xl font-bold">Tur 1 / 10</p>
+                <p className="text-2xl font-bold">Tur {round.round_number} / {room.total_rounds}</p>
               </div>
             </div>
 
@@ -194,7 +278,6 @@ export default function GamePage() {
             </div>
           </div>
 
-          {/* Form */}
           <div className="flex-1 overflow-y-auto custom-scrollbar">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {GAME_CATEGORIES.map((cat, index) => (
@@ -215,7 +298,7 @@ export default function GamePage() {
                     maxLength={30}
                     value={answers[cat] || ''}
                     onChange={(e) => handleInputChange(cat, e.target.value.toUpperCase())}
-                    placeholder={`${currentLetter} ile başlayan...`}
+                    placeholder={`${round.letter} ile başlayan...`}
                     className="w-full bg-transparent border-none outline-none text-2xl font-medium text-white placeholder-neutral-700 focus:ring-0"
                   />
                 </motion.div>
@@ -223,10 +306,9 @@ export default function GamePage() {
             </div>
           </div>
 
-          {/* Footer Action */}
           <div className="mt-8 flex justify-end">
             <button 
-              onClick={handleSubmit}
+              onClick={submitData}
               className="group flex items-center px-8 py-4 bg-blue-600 hover:bg-blue-500 rounded-2xl font-bold text-lg shadow-[0_0_40px_rgba(37,99,235,0.3)] transition-all hover:scale-105"
             >
               Cevapları Gönder 
@@ -236,12 +318,13 @@ export default function GamePage() {
         </div>
       )}
 
-      {/* 3. Submitting State */}
-      {gameState === 'submitting' && (
+      {(gameState === 'submitting' || gameState === 'evaluating') && (
         <div className="flex-1 flex flex-col items-center justify-center">
           <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-6" />
-          <h2 className="text-2xl font-bold">Cevaplar Değerlendiriliyor...</h2>
-          <p className="text-neutral-400 mt-2">Yapay Zeka (Gemini) sonuçları analiz ediyor</p>
+          <h2 className="text-2xl font-bold">
+            {gameState === 'submitting' ? 'Cevaplar İletiliyor...' : 'Yapay Zeka Değerlendiriyor...'}
+          </h2>
+          <p className="text-neutral-400 mt-2">Bu işlem birkaç saniye sürebilir, lütfen bekleyin.</p>
         </div>
       )}
     </div>

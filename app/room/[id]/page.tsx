@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { motion } from 'framer-motion'
+import { startGameAction } from '@/app/actions/gameActions'
 import { Users, Crown, Settings, LogOut, CheckCircle2, Play, UserPlus, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -166,13 +167,14 @@ export default function LobbyPage() {
       return
     }
 
-    // Update room status
-    await supabase
-      .from('rooms')
-      .update({ status: 'playing' })
-      .eq('id', room.id)
-    
-    // Yönlendirme Realtime tarafından tetiklenecek
+    try {
+      toast.loading('Oyun başlatılıyor...', { id: 'start' })
+      await startGameAction(room.id, room.total_rounds)
+      toast.success('Oyun başladı!', { id: 'start' })
+      // Yönlendirme Realtime tarafından tetiklenecek
+    } catch (err: any) {
+      toast.error(err.message, { id: 'start' })
+    }
   }
 
   if (loading || !room) {
