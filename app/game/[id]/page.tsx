@@ -20,6 +20,7 @@ export default function GamePage() {
   const [gameState, setGameState] = useState<'starting' | 'playing' | 'submitting' | 'evaluating'>('starting')
   const [countdown, setCountdown] = useState(5)
   const [timeLeft, setTimeLeft] = useState(60)
+  const [localStartTime, setLocalStartTime] = useState<number | null>(null)
   
   const [room, setRoom] = useState<any>(null)
   const [game, setGame] = useState<any>(null)
@@ -69,7 +70,10 @@ export default function GamePage() {
           .limit(1)
           .single()
         
-        if (roundData) setRound(roundData)
+        if (roundData) {
+           setRound(roundData)
+           setLocalStartTime(Date.now())
+        }
         else {
            // Round ended, push to results
            router.push(`/game/${id}/results`)
@@ -103,12 +107,15 @@ export default function GamePage() {
   // Fullscreen Entegrasyonu
   const enterFullscreen = async () => {
     try {
-      if (containerRef.current && !document.fullscreenElement) {
-        await containerRef.current.requestFullscreen()
-        setIsFullscreen(true)
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen()
       }
+      setIsFullscreen(true)
     } catch (err) {
+      console.error(err)
       toast.error('Tam ekrana geçilemedi. Oyunu oynamak için tam ekran zorunludur.')
+      // Fallback: Just let them play anyway if fullscreen is blocked
+      setIsFullscreen(true)
     }
   }
 
@@ -200,27 +207,26 @@ export default function GamePage() {
     }
   }, [gameState, round, answers, room, currentUser])
 
-  // Oyun Döngüsü (Sunucu saatine göre tam senkronize)
+  // Oyun Döngüsü (Bağıl zaman tabanlı tam senkronizasyon - sekme uykuya dalsa bile etkilenmez)
   useEffect(() => {
-    if (!round || !room || gameState === 'submitting' || gameState === 'evaluating') return
+    if (!round || !room || !localStartTime || gameState === 'submitting' || gameState === 'evaluating') return
 
-    // created_at bilgisini milisaniye cinsine çevir
-    const serverStartTime = new Date(round.created_at).getTime()
     const gameDurationMs = room.round_time * 1000
     const startDelayMs = 5000 // 5 saniye bekleme
     
     const interval = setInterval(() => {
       const now = Date.now()
+      const elapsed = now - localStartTime
       
       // 1. Bekleme Süresi (Starting)
-      if (now < serverStartTime + startDelayMs) {
+      if (elapsed < startDelayMs) {
         setGameState('starting')
-        setCountdown(Math.ceil((serverStartTime + startDelayMs - now) / 1000))
+        setCountdown(Math.ceil((startDelayMs - elapsed) / 1000))
       } 
       // 2. Oyun Süresi (Playing)
-      else if (now < serverStartTime + startDelayMs + gameDurationMs) {
+      else if (elapsed < startDelayMs + gameDurationMs) {
         setGameState('playing')
-        setTimeLeft(Math.ceil((serverStartTime + startDelayMs + gameDurationMs - now) / 1000))
+        setTimeLeft(Math.ceil((startDelayMs + gameDurationMs - elapsed) / 1000))
       } 
       // 3. Süre Bitti (Submitting)
       else {
@@ -231,7 +237,7 @@ export default function GamePage() {
     }, 500)
 
     return () => clearInterval(interval)
-  }, [round, room, gameState, submitData])
+  }, [round, room, gameState, localStartTime, submitData])
 
   const handleInputChange = (category: string, value: string) => {
     setAnswers(prev => ({
