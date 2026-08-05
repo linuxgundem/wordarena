@@ -81,15 +81,15 @@ export async function POST(request: Request) {
 
     const ai = new GoogleGenAI({ apiKey })
 
-    const prompt = `Sen katı ve acımasız bir İsim-Şehir oyunu hakemisin. Geçerli harf: "${currentLetter}".
+    const prompt = `Sen katı ve acımasız ama çok bilgili bir İsim-Şehir oyunu hakemisin. Geçerli harf: "${currentLetter}".
 Oyun Türkçe oynanıyor. Aşağıdaki JSON listesinde oyuncuların gönderdiği kelimeleri değerlendireceksin.
 
 KURALLAR (ÇOK KATI):
-1. HARF KURALI: Kelime kesinlikle ve istisnasız "${currentLetter}" harfiyle başlamalıdır.
+1. HARF KURALI: Kelime kesinlikle ve istisnasız "${currentLetter}" harfiyle başlamalıdır. (BÜYÜK/küçük harf duyarlılığı yoktur; i/İ, ı/I, ç/Ç, ş/Ş, ğ/Ğ, ö/Ö, ü/Ü harfleri Türkçedeki gibi eşdeğer sayılır. Örn: Harf "İ" ise, "inek" yazılması geçerlidir).
 2. BİRDEN FAZLA KELİME SERBESTTİR: Oyuncular özel isim, ünlü kişi, ülke gibi kategorilerde 2 veya 3 kelimelik cevaplar yazabilirler (Örn: "Cem Yılmaz", "Güney Kore", "Los Angeles"). Birden fazla kelime olması KESİNLİKLE GEÇERLİDİR ve hata sebebi değildir.
-3. KATEGORİ KURALI VE DETAYLI AÇIKLAMA: 
-- Kelime DOĞRUYSA: "reasoning" kısmında sadece "bu geçerlidir" deme. Yazılan kelimenin **ne olduğunu kısaca açıkla**. (Örn: "CEVİZ, C harfiyle başlayan sert kabuklu bir ağaç yemişidir ve Bitki kategorisine uyar.")
-- Kelime YANLIŞSA veya YANLIŞ YAZILMIŞSA: Neden yanlış olduğunu açıkla ve **doğru yazılışını veya o kategoriye uyan doğru bir örnek kelimeyi** mutlaka belirt. (Örn: "CAD kelimesi geçersizdir, doğru kullanımı 'Çad' olmalıydı ve Ç harfiyle başlar." veya "ELMA bir Hayvan değildir, C harfiyle başlayan bir hayvan için 'Ceylan' yazabilirdin.")
+3. DETAYLI ANSİKLOPEDİK AÇIKLAMA (ÖNEMLİ): 
+- Kelime DOĞRUYSA: "reasoning" kısmında sadece "bu geçerlidir" deme. Yazılan kelimenin TAM OLARAK ne olduğunu, sözlük anlamını veya o kişinin kim olduğunu **ansiklopedik, bilgi verici ve uzun bir dille** açıkla. (Örn: "ZEYNEP, Arapça kökenli olup 'değerli taş, mücevher' veya 'babasının süsü' anlamına gelen, Türkiye'de çok yaygın kullanılan bir kadın ismidir." veya "ZEBRA, atgiller familyasından, Afrika'ya özgü, siyah-beyaz çizgili postuyla tanınan ve sürüler halinde yaşayan otçul bir memeli türüdür.")
+- Kelime YANLIŞSA veya YANLIŞ YAZILMIŞSA: Neden yanlış olduğunu detaylıca açıkla ve mutlaka o kategoriye uyan doğru bir örnek kelime ver. (Örn: "ELMA bir Hayvan değildir, C harfiyle başlayan bir hayvan için 'Ceylan' veya 'Civciv' yazabilirdin.")
 4. Asla "birden fazla kelimeden oluştuğu için geçersizdir" deme. İki/üç kelime (özel isim vb.) her zaman serbesttir.
 
 Değerlendirilecek Veri:
