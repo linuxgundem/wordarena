@@ -6,7 +6,6 @@ import { createClient } from '@/lib/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { Timer, AlertTriangle, Send } from 'lucide-react'
-import { submitAnswersAction, evaluateRoundAction } from '@/app/actions/gameActions'
 
 const GAME_CATEGORIES = ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
 
@@ -161,15 +160,36 @@ export default function GamePage() {
     toast.success('Cevaplar gönderiliyor...')
     
     try {
-      await submitAnswersAction(round.id, answers)
+      // Get categories
+      const { data: categories } = await supabase.from('categories').select('id, name')
+      if (categories) {
+        const inserts = []
+        for (const [catName, answerText] of Object.entries(answers)) {
+          const category = categories.find(c => c.name === catName)
+          if (!category || !answerText.trim()) continue
+          inserts.push({
+            round_id: round.id,
+            profile_id: currentUser.id,
+            category_id: category.id,
+            answer_text: answerText.trim().toUpperCase()
+          })
+        }
+        if (inserts.length > 0) {
+          await supabase.from('answers').insert(inserts)
+        }
+      }
+
       setGameState('evaluating')
       
-      // If Host, trigger evaluation after a short delay to let others submit
+      // If Host, trigger evaluation API
       if (room && currentUser && room.owner_id === currentUser.id) {
         setTimeout(async () => {
           try {
-             await evaluateRoundAction(round.id, room.id)
-             // The realtime subscription will redirect everyone
+             await fetch('/api/evaluate', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ roundId: round.id, roomId: room.id })
+             })
           } catch (err: any) {
              toast.error('Değerlendirme hatası: ' + err.message)
           }

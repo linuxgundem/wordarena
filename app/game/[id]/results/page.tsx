@@ -6,7 +6,6 @@ import { createClient } from '@/lib/supabase/client'
 import { motion } from 'framer-motion'
 import { Trophy, CheckCircle, XCircle, ArrowRight, BrainCircuit, Star, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
-import { startNextRoundAction } from '@/app/actions/gameActions'
 
 export default function ResultsPage() {
   const { id } = useParams()
@@ -135,8 +134,18 @@ export default function ResultsPage() {
     if (!game || !round) return
     setIsStartingNext(true)
     try {
-       await startNextRoundAction(game.id, round.round_number)
-       // Realtime event will redirect everyone
+       const alphabet = "ABCDEFGHIJKLMNOPRSTUVYZ"
+       const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)]
+
+       const { error } = await supabase
+         .from('rounds')
+         .insert({
+           game_id: game.id,
+           round_number: round.round_number + 1,
+           letter: randomLetter
+         })
+       
+       if (error) throw new Error("Yeni tur başlatılamadı.")
     } catch (err: any) {
        toast.error(err.message)
        setIsStartingNext(false)

@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { motion } from 'framer-motion'
-import { startGameAction } from '@/app/actions/gameActions'
 import { Users, Crown, Settings, LogOut, CheckCircle2, Play, UserPlus, Lock } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -160,7 +159,6 @@ export default function LobbyPage() {
   const startGame = async () => {
     if (!room || room.owner_id !== currentUser?.id) return
     
-    // Check if everyone is ready
     const allReady = players.every(p => p.is_ready)
     if (!allReady) {
       toast.error('Tüm oyuncuların hazır olması gerekiyor.')
@@ -169,9 +167,27 @@ export default function LobbyPage() {
 
     try {
       toast.loading('Oyun başlatılıyor...', { id: 'start' })
-      await startGameAction(room.id, room.total_rounds)
+      
+      const { data: game, error: gameError } = await supabase
+        .from('games')
+        .insert({ room_id: room.id, status: 'in_progress' })
+        .select()
+        .single()
+
+      if (gameError || !game) throw new Error('Oyun oluşturulamadı.')
+
+      const alphabet = "ABCDEFGHIJKLMNOPRSTUVYZ"
+      const randomLetter = alphabet[Math.floor(Math.random() * alphabet.length)]
+
+      const { error: roundError } = await supabase
+        .from('rounds')
+        .insert({ game_id: game.id, round_number: 1, letter: randomLetter })
+
+      if (roundError) throw new Error('Tur oluşturulamadı.')
+
+      await supabase.from('rooms').update({ status: 'playing' }).eq('id', room.id)
+      
       toast.success('Oyun başladı!', { id: 'start' })
-      // Yönlendirme Realtime tarafından tetiklenecek
     } catch (err: any) {
       toast.error(err.message, { id: 'start' })
     }
