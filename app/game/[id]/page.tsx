@@ -11,6 +11,7 @@ const GAME_CATEGORIES = ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek'
 
 export default function GamePage() {
   const { id } = useParams()
+  const router = useRouter()
   const supabase = createClient()
   
   const containerRef = useRef<HTMLDivElement>(null)
