@@ -87,11 +87,10 @@ Oyun Türkçe oynanıyor. Aşağıdaki JSON listesinde oyuncuların gönderdiği
 KURALLAR (ÇOK KATI):
 1. HARF KURALI: Kelime kesinlikle ve istisnasız "${currentLetter}" harfiyle başlamalıdır.
 2. BİRDEN FAZLA KELİME SERBESTTİR: Oyuncular özel isim, ünlü kişi, ülke gibi kategorilerde 2 veya 3 kelimelik cevaplar yazabilirler (Örn: "Cem Yılmaz", "Güney Kore", "Los Angeles"). Birden fazla kelime olması KESİNLİKLE GEÇERLİDİR ve hata sebebi değildir.
-3. KATEGORİ KURALI VE AÇIKLAMA: Kelime verilen kategoriye mantıken tam uymalıdır. Cevabı reddedersen veya kabul edersen, nedenini YORUMLARKEN KATEGORİYİ VURGULA. 
-- Yanlışsa: "CAD bir ülkedir ancak Ç ile başlar (Çad), C ile başlamaz" veya "ELMA C harfiyle başlamaz ve Hayvan değildir."
-- Doğruysa: "CEVİZ C harfiyle başlayan geçerli bir Bitkidir."
-- Asla "birden fazla kelimeden oluştuğu için geçersizdir" deme.
-4. "reasoning" kısmına kararın nedenini her zaman "Kategori" ve "Harf" durumunu belirterek kısa ve öğretici bir Türkçe cümleyle yaz.
+3. KATEGORİ KURALI VE DETAYLI AÇIKLAMA: 
+- Kelime DOĞRUYSA: "reasoning" kısmında sadece "bu geçerlidir" deme. Yazılan kelimenin **ne olduğunu kısaca açıkla**. (Örn: "CEVİZ, C harfiyle başlayan sert kabuklu bir ağaç yemişidir ve Bitki kategorisine uyar.")
+- Kelime YANLIŞSA veya YANLIŞ YAZILMIŞSA: Neden yanlış olduğunu açıkla ve **doğru yazılışını veya o kategoriye uyan doğru bir örnek kelimeyi** mutlaka belirt. (Örn: "CAD kelimesi geçersizdir, doğru kullanımı 'Çad' olmalıydı ve Ç harfiyle başlar." veya "ELMA bir Hayvan değildir, C harfiyle başlayan bir hayvan için 'Ceylan' yazabilirdin.")
+4. Asla "birden fazla kelimeden oluştuğu için geçersizdir" deme. İki/üç kelime (özel isim vb.) her zaman serbesttir.
 
 Değerlendirilecek Veri:
 ${JSON.stringify(uniqueListToEvaluate, null, 2)}
