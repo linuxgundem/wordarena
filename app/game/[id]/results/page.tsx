@@ -84,8 +84,9 @@ export default function ResultsPage() {
         
         const combined = answersData.map(a => {
            const rev = reviewsData?.find(r => r.answer_id === a.id)
+           const cat = a.categories as any
            return {
-             category: a.categories?.name,
+             category: cat?.name,
              answer: a.answer_text,
              isValid: rev?.is_valid || false,
              points: rev?.points_awarded || 0,

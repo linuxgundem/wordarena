@@ -38,7 +38,7 @@ export async function seedCategories() {
   const supabase = await getSupabase()
   
   for (const cat of DEFAULT_CATEGORIES) {
-    await supabase.from('categories').insert({ name: cat }).select().single().catch(() => {})
+    await supabase.from('categories').insert({ name: cat }).select().single()
   }
 }
 
@@ -139,7 +139,21 @@ export async function evaluateRoundAction(roundId: string, roomId: string) {
 
   if (!answers || answers.length === 0) {
     // Kimse cevap vermemişse direkt turu bitir
-    return await proceedToNextRound(round, roomData?.total_rounds || 10, supabase)
+    await supabase.from('rounds').update({ ended_at: new Date().toISOString() }).eq('id', round.id)
+    
+    // Check if game over
+    const totalRounds = roomData?.total_rounds || 10
+    if (round.round_number >= totalRounds) {
+      await supabase.from('games').update({ 
+        status: 'completed', 
+        finished_at: new Date().toISOString() 
+      }).eq('id', round.game_id)
+      
+      await supabase.from('rooms').update({ status: 'finished' }).eq('id', round.games.room_id)
+      return { status: 'game_over' }
+    }
+
+    return { status: 'round_evaluated' }
   }
 
   // 3. Gemini Prompt'u Hazırla
@@ -157,7 +171,10 @@ Kurallar:
 4. "reasoning" kısmında nedenini (1 kısa cümle) Türkçe açıkla.
 
 Gelen Veri:
-${JSON.stringify(answers.map(a => ({ id: a.id, cat: a.categories.name, ans: a.answer_text })), null, 2)}
+${JSON.stringify(answers.map(a => {
+  const cat = a.categories as any
+  return { id: a.id, cat: cat?.name, ans: a.answer_text }
+}), null, 2)}
 
 SADECE ŞU JSON FORMATINDA YANIT VER, BAŞKA HİÇBİR YAZI EKLEME:
 {
@@ -193,7 +210,8 @@ SADECE ŞU JSON FORMATINDA YANIT VER, BAŞKA HİÇBİR YAZI EKLEME:
       if (!answer) continue
 
       if (res.isValid) {
-        const key = `${answer.categories.name}:${answer.answer_text}`
+        const cat = answer.categories as any
+        const key = `${cat?.name}:${answer.answer_text}`
         if (!validAnswersMap[key]) validAnswersMap[key] = []
         validAnswersMap[key].push(answer.profile_id)
       }
@@ -207,7 +225,8 @@ SADECE ŞU JSON FORMATINDA YANIT VER, BAŞKA HİÇBİR YAZI EKLEME:
 
       let points = 0
       if (res.isValid) {
-        const key = `${answer.categories.name}:${answer.answer_text}`
+        const cat = answer.categories as any
+        const key = `${cat?.name}:${answer.answer_text}`
         const count = validAnswersMap[key].length
         
         if (count === 1) points = 10
