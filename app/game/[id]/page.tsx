@@ -20,6 +20,9 @@ export default function GamePage() {
   const [timeLeft, setTimeLeft] = useState(60)
   const [localStartTime, setLocalStartTime] = useState<number | null>(null)
   
+  const [totalPlayers, setTotalPlayers] = useState(1)
+  const [submittedPlayers, setSubmittedPlayers] = useState<string[]>([])
+  
   const [room, setRoom] = useState<any>(null)
   const [game, setGame] = useState<any>(null)
   const [round, setRound] = useState<any>(null)
@@ -42,6 +45,12 @@ export default function GamePage() {
       const { data: roomData } = await supabase.from('rooms').select('*').eq('id', id).single()
       if (roomData) {
         setRoom(roomData)
+        // Odaya katılan toplam oyuncu sayısını çek
+        const { count } = await supabase
+          .from('room_players')
+          .select('*', { count: 'exact', head: true })
+          .eq('room_id', roomData.id)
+        if (count) setTotalPlayers(count)
         setTimeLeft(roomData.round_time)
       }
 
@@ -132,8 +141,11 @@ export default function GamePage() {
     }
     const handleFullscreenChange = () => {
       if (!document.fullscreenElement) {
-        setIsFullscreen(false)
-        toast.error('Tam ekrandan çıkmak yasaktır! Lütfen geri dönün.', { duration: 4000 })
+        setCheatWarnings(prev => prev + 1)
+        toast.error(`Uyarı: Tam ekrandan çıktınız! (${cheatWarnings + 1}/3)`)
+        if (cheatWarnings + 1 >= 3) {
+          router.push(`/room/${id}`)
+        }
       } else {
         setIsFullscreen(true)
       }
@@ -156,7 +168,48 @@ export default function GamePage() {
       document.removeEventListener('copy', handleCopyPaste)
       document.removeEventListener('paste', handleCopyPaste)
     }
-  }, [gameState])
+  }, [id, router, isFullscreen, cheatWarnings, gameState])
+
+  // Broadcast dinleyicisi (Gönderen oyuncuları takip et)
+  useEffect(() => {
+    if (!room) return
+    const channel = supabase.channel(`game_events:${room.id}`)
+      .on('broadcast', { event: 'player_submitted' }, ({ payload }) => {
+         setSubmittedPlayers(prev => {
+            if (prev.includes(payload.profileId)) return prev
+            return [...prev, payload.profileId]
+         })
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [room, supabase])
+
+  // Herkes gönderdiyse erken bitir
+  useEffect(() => {
+    if (gameState !== 'playing' && gameState !== 'submitting') return
+    if (submittedPlayers.length >= totalPlayers && totalPlayers > 0) {
+      setGameState('evaluating')
+      setTimeLeft(0)
+      
+      if (room && currentUser && room.owner_id === currentUser.id) {
+        setTimeout(async () => {
+          try {
+             await fetch('/api/evaluate', {
+               method: 'POST',
+               headers: { 'Content-Type': 'application/json' },
+               body: JSON.stringify({ 
+                 roundId: round.id, 
+                 roomId: room.id,
+                 customCategories: room.custom_categories || ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
+               })
+             })
+          } catch (err: any) {
+             toast.error('Değerlendirme hatası: ' + err.message)
+          }
+        }, 2000) // Son kişinin kaydı tamamlansın diye kısa tolerans
+      }
+    }
+  }, [submittedPlayers, totalPlayers, gameState, room, currentUser, round])
 
   // Submit Logic
   const submitData = useCallback(async () => {
@@ -183,6 +236,16 @@ export default function GamePage() {
           console.error('Answer insert error:', error)
         }
       }
+
+      // Herkese gönderdiğimi bildir
+      if (room && currentUser) {
+        supabase.channel(`game_events:${room.id}`).send({
+          type: 'broadcast',
+          event: 'player_submitted',
+          payload: { profileId: currentUser.id }
+        })
+      }
+      
     } catch(err: any) {
       toast.error(err.message)
     }
@@ -219,29 +282,31 @@ export default function GamePage() {
 
         setGameState('evaluating')
 
-        // Kurucu, tüm veriler kaydolduktan 5 saniye sonra yapay zekayı tetikler
-        if (room && currentUser && room.owner_id === currentUser.id) {
-          setTimeout(async () => {
-            try {
-               await fetch('/api/evaluate', {
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ 
-                   roundId: round.id, 
-                   roomId: room.id,
-                   customCategories: room.custom_categories || ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
+        // Sadece kendi kendine bittiyse (erken bitirme tetiklenmediyse)
+        if (submittedPlayers.length < totalPlayers) {
+          if (room && currentUser && room.owner_id === currentUser.id) {
+            setTimeout(async () => {
+              try {
+                 await fetch('/api/evaluate', {
+                   method: 'POST',
+                   headers: { 'Content-Type': 'application/json' },
+                   body: JSON.stringify({ 
+                     roundId: round.id, 
+                     roomId: room.id,
+                     customCategories: room.custom_categories || ['İsim', 'Şehir', 'Ülke', 'Hayvan', 'Bitki', 'Meslek']
+                   })
                  })
-               })
-            } catch (err: any) {
-               toast.error('Değerlendirme hatası: ' + err.message)
-            }
-          }, 5000)
+              } catch (err: any) {
+                 toast.error('Değerlendirme hatası: ' + err.message)
+              }
+            }, 5000)
+          }
         }
       }
     }, 500)
 
     return () => clearInterval(interval)
-  }, [round, room, gameState, localStartTime, submitData, currentUser])
+  }, [round, room, gameState, localStartTime, submitData, currentUser, submittedPlayers.length, totalPlayers])
 
   const handleInputChange = (category: string, value: string) => {
     setAnswers(prev => ({
