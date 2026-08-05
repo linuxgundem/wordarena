@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Trophy, CheckCircle, XCircle, ArrowRight, BrainCircuit, Star, Loader2, AlertTriangle, User, ThumbsUp, ThumbsDown } from 'lucide-react'
+import { Trophy, CheckCircle, XCircle, ArrowRight, BrainCircuit, Star, Loader2, AlertTriangle, User, UserMinus, UserCheck } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 export default function ResultsPage() {
@@ -22,15 +22,16 @@ export default function ResultsPage() {
   const [currentUser, setCurrentUser] = useState<any>(null)
   const [isStartingNext, setIsStartingNext] = useState(false)
 
-  // Oylama State'leri
-  const [activeObjection, setActiveObjection] = useState<any>(null)
-  const [objectionTimer, setObjectionTimer] = useState(0)
-  const [votes, setVotes] = useState<Record<string, boolean>>({})
+  // Sürekli İtiraz ve Doğrulama State'leri (Cevap ID -> İtiraz Edenlerin/Doğrulayanların Listesi)
+  const [objections, setObjections] = useState<Record<string, { id: string, username: string }[]>>({})
+  const [verifications, setVerifications] = useState<Record<string, { id: string, username: string }[]>>({})
 
   const fetchResults = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return router.push('/login')
-    setCurrentUser(user)
+
+    const { data: profile } = await supabase.from('profiles').select('username').eq('id', user.id).single()
+    setCurrentUser({ ...user, username: profile?.username || 'Anonim' })
 
     const { data: roomData } = await supabase.from('rooms').select('*').eq('id', id).single()
     setRoom(roomData)
@@ -68,7 +69,9 @@ export default function ResultsPage() {
            answer: a.answer_text,
            isValid: rev?.is_valid || false,
            points: rev?.points_awarded || 0,
-           reasoning: rev?.reasoning || 'Cevap bulunamadı veya değerlendirilemedi.'
+           reasoning: rev?.reasoning || 'Cevap bulunamadı veya değerlendirilemedi.',
+           _revoked: false,
+           _verified: false
          }
       })
       // Kategorilere göre sırala
@@ -94,82 +97,125 @@ export default function ResultsPage() {
              router.push(`/room/${id}`)
           }
       })
-      .on('broadcast', { event: 'objection_started' }, ({ payload }) => {
-         setActiveObjection(payload.answer)
-         setVotes({})
-         setObjectionTimer(15)
+      .on('broadcast', { event: 'answer_objected' }, ({ payload }) => {
+         setObjections(prev => {
+            const arr = prev[payload.answerId] || []
+            if (arr.some(a => a.id === payload.profileId)) return prev
+            return { ...prev, [payload.answerId]: [...arr, { id: payload.profileId, username: payload.username }] }
+         })
+         checkThresholds(payload.answerId, 'objection', payload.activePlayersCount)
       })
-      .on('broadcast', { event: 'vote_cast' }, ({ payload }) => {
-         setVotes(prev => ({ ...prev, [payload.profileId]: payload.vote }))
+      .on('broadcast', { event: 'answer_verified' }, ({ payload }) => {
+         setVerifications(prev => {
+            const arr = prev[payload.answerId] || []
+            if (arr.some(a => a.id === payload.profileId)) return prev
+            return { ...prev, [payload.answerId]: [...arr, { id: payload.profileId, username: payload.username }] }
+         })
+         checkThresholds(payload.answerId, 'verification', payload.activePlayersCount)
       })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
   }, [game, id, router, supabase])
 
-  // İtiraz Zamanlayıcısı ve Sonuçlandırma
-  useEffect(() => {
-    if (objectionTimer > 0) {
-      const t = setTimeout(() => setObjectionTimer(objectionTimer - 1), 1000)
-      return () => clearTimeout(t)
-    } else if (objectionTimer === 0 && activeObjection) {
-      handleObjectionEnd()
-    }
-  }, [objectionTimer, activeObjection])
+  const activePlayersCount = useMemo(() => {
+    return Math.max(1, new Set(results.map(r => r.profileId)).size)
+  }, [results])
 
-  const handleObjectionEnd = async () => {
-     if (currentUser?.id === room?.owner_id) {
-        const yes = Object.values(votes).filter(v => v).length
-        const no = Object.values(votes).filter(v => !v).length
-        
-        if (yes > no) {
-           if (!activeObjection.isValid) {
-             toast.success('İtiraz kabul edildi! Puanlar düzeltiliyor...')
-             await supabase.from('answer_reviews').update({ is_valid: true, points_awarded: 10 }).eq('answer_id', activeObjection.id)
-             
-             const { data: scoreData } = await supabase.from('scores').select('total_score').eq('game_id', game.id).eq('profile_id', activeObjection.profileId).maybeSingle()
-             if (scoreData) {
-                await supabase.from('scores').update({ total_score: scoreData.total_score + 10 }).eq('game_id', game.id).eq('profile_id', activeObjection.profileId)
-             }
-           } else {
-             toast.success('İtiraz kabul edildi! Hatalı verilen puan geri alınıyor...')
-             await supabase.from('answer_reviews').update({ is_valid: false, points_awarded: 0 }).eq('answer_id', activeObjection.id)
-             
-             const { data: scoreData } = await supabase.from('scores').select('total_score').eq('game_id', game.id).eq('profile_id', activeObjection.profileId).maybeSingle()
-             if (scoreData) {
-                await supabase.from('scores').update({ total_score: Math.max(0, scoreData.total_score - activeObjection.points) }).eq('game_id', game.id).eq('profile_id', activeObjection.profileId)
-             }
+  // Eşik kontrolünü hem local tetikleyici hem de yayın alanlar kontrol eder
+  // Ancak DB güncellemesini sadece tetikleyici (oy veren) yapar
+  const checkThresholds = (answerId: string, type: 'objection' | 'verification', currentTotalPlayers: number) => {
+     setResults(prev => {
+        return prev.map(res => {
+           if (res.id !== answerId) return res
+           
+           const threshold = Math.max(1, currentTotalPlayers - 1)
+           
+           if (type === 'objection') {
+              setObjections(objs => {
+                 const currentList = objs[answerId] || []
+                 if (currentList.length >= threshold && !res._revoked) {
+                    res._revoked = true
+                    res.isValid = false
+                    res.points = 0
+                 }
+                 return objs
+              })
+           } else if (type === 'verification') {
+              setVerifications(vers => {
+                 const currentList = vers[answerId] || []
+                 if (currentList.length >= threshold && !res._verified) {
+                    res._verified = true
+                    res.isValid = true
+                    res.points = 10
+                 }
+                 return vers
+              })
            }
-        } else {
-           toast.error('İtiraz oy çokluğuyla reddedildi.')
-        }
-     }
-     setActiveObjection(null)
-     setTimeout(() => fetchResults(), 1000) // Güncel verileri çek
+           return res
+        })
+     })
   }
 
-  const startObjection = (answer: any) => {
-    if (activeObjection) return toast.error('Şu anda devam eden bir oylama var!')
+  const handleObject = async (res: any) => {
+    if (!currentUser || res._revoked || res._verified) return
+    if (res.profileId === currentUser.id) return toast.error("Kendi cevabınıza itiraz edemezsiniz!")
+
+    const currentList = objections[res.id] || []
+    if (currentList.some(a => a.id === currentUser.id)) return
+    
+    const newArr = [...currentList, { id: currentUser.id, username: currentUser.username }]
+    setObjections(prev => ({ ...prev, [res.id]: newArr }))
+
     supabase.channel(`game:${game.id}`).send({
       type: 'broadcast',
-      event: 'objection_started',
-      payload: { answer }
+      event: 'answer_objected',
+      payload: { answerId: res.id, profileId: currentUser.id, username: currentUser.username, activePlayersCount }
     })
+
+    const threshold = Math.max(1, activePlayersCount - 1)
+    if (newArr.length >= threshold) {
+      toast.success('Oy çokluğuyla puan İPTAL edildi!')
+      // DB Güncellemesini sadece bu eşiği aşan kişi (son itirazı yapan) yapar
+      await supabase.from('answer_reviews').update({ is_valid: false, points_awarded: 0 }).eq('answer_id', res.id)
+      const { data: scoreData } = await supabase.from('scores').select('total_score').eq('game_id', game.id).eq('profile_id', res.profileId).maybeSingle()
+      if (scoreData) {
+         await supabase.from('scores').update({ total_score: Math.max(0, scoreData.total_score - res.points) }).eq('game_id', game.id).eq('profile_id', res.profileId)
+      }
+      checkThresholds(res.id, 'objection', activePlayersCount)
+    }
   }
 
-  const castVote = (vote: boolean) => {
-    if (!currentUser) return
-    setVotes(prev => ({ ...prev, [currentUser.id]: vote }))
+  const handleVerify = async (res: any) => {
+    if (!currentUser || res._revoked || res._verified) return
+    if (res.profileId === currentUser.id) return toast.error("Kendi cevabınızı onaylayamazsınız!")
+
+    const currentList = verifications[res.id] || []
+    if (currentList.some(a => a.id === currentUser.id)) return
+    
+    const newArr = [...currentList, { id: currentUser.id, username: currentUser.username }]
+    setVerifications(prev => ({ ...prev, [res.id]: newArr }))
+
     supabase.channel(`game:${game.id}`).send({
       type: 'broadcast',
-      event: 'vote_cast',
-      payload: { profileId: currentUser.id, vote }
+      event: 'answer_verified',
+      payload: { answerId: res.id, profileId: currentUser.id, username: currentUser.username, activePlayersCount }
     })
+
+    const threshold = Math.max(1, activePlayersCount - 1)
+    if (newArr.length >= threshold) {
+      toast.success('Oy çokluğuyla KABUL edildi!')
+      await supabase.from('answer_reviews').update({ is_valid: true, points_awarded: 10 }).eq('answer_id', res.id)
+      const { data: scoreData } = await supabase.from('scores').select('total_score').eq('game_id', game.id).eq('profile_id', res.profileId).maybeSingle()
+      if (scoreData) {
+         await supabase.from('scores').update({ total_score: scoreData.total_score + 10 }).eq('game_id', game.id).eq('profile_id', res.profileId)
+      }
+      checkThresholds(res.id, 'verification', activePlayersCount)
+    }
   }
 
   const handleNextRound = async () => {
     if (!game || !round) return
-    if (activeObjection) return toast.error('Oylama bitmeden yeni tura geçemezsiniz!')
     setIsStartingNext(true)
     try {
        const alphabet = "ABCDEFGHIJKLMNOPRSTUVYZ"
@@ -189,7 +235,7 @@ export default function ResultsPage() {
       acc[res.category].push(res)
       return acc
     }, {})
-  }, [results])
+  }, [results, objections, verifications])
 
   if (loading) return <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">Sonuçlar yükleniyor...</div>
 
@@ -224,34 +270,88 @@ export default function ResultsPage() {
                   Kategori: {categoryName}
                 </h2>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {categoryResults.map((res: any, index: number) => (
-                    <motion.div key={res.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: index * 0.05 }} className={`p-5 rounded-2xl border backdrop-blur-sm flex flex-col justify-between gap-3 ${res.isValid ? 'bg-blue-900/10 border-blue-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
-                      <div className="flex justify-between items-start">
-                         <div className="flex items-center gap-2 text-sm text-neutral-400 mb-2">
-                           <User className="w-4 h-4" /> {res.username}
-                         </div>
-                         <div className="flex items-center bg-neutral-900/50 px-3 py-1 rounded-lg border border-neutral-800">
-                            <span className={`font-black text-lg ${res.points > 0 ? 'text-green-400' : 'text-red-400'}`}>+{res.points}</span>
-                         </div>
-                      </div>
-                      
-                      <div className="flex items-start gap-3">
-                        {res.isValid ? <CheckCircle className="w-6 h-6 text-green-500 mt-1" /> : <XCircle className="w-6 h-6 text-red-500 mt-1" />}
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-xs font-bold text-neutral-500 uppercase">{res.category}:</span>
-                            <span className="text-lg font-bold text-white break-all">{res.answer}</span>
+                  {categoryResults.map((res: any, index: number) => {
+                     const obs = objections[res.id] || []
+                     const vers = verifications[res.id] || []
+                     const isDone = res._revoked || res._verified
+                     const bgCard = res._revoked ? 'bg-neutral-900/30 border-neutral-800 opacity-60 grayscale' : res._verified ? 'bg-green-900/10 border-green-900/30' : res.isValid ? 'bg-blue-900/10 border-blue-900/30' : 'bg-red-900/10 border-red-900/30'
+                     
+                     return (
+                      <motion.div key={res.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: index * 0.05 }} className={`p-5 rounded-2xl border backdrop-blur-sm flex flex-col justify-between gap-3 relative ${bgCard}`}>
+                        
+                        {res._revoked && (
+                          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                            <div className="bg-red-600 text-white font-black px-6 py-2 rounded-xl rotate-12 text-2xl uppercase border-4 border-red-800 shadow-2xl">
+                              İptal Edildi
+                            </div>
                           </div>
-                          <p className="text-xs text-neutral-400 leading-relaxed">{res.reasoning}</p>
-                        </div>
-                      </div>
+                        )}
+                        {res._verified && (
+                          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                            <div className="bg-green-600 text-white font-black px-6 py-2 rounded-xl -rotate-12 text-2xl uppercase border-4 border-green-800 shadow-2xl">
+                              Kabul Edildi
+                            </div>
+                          </div>
+                        )}
 
-                      <button onClick={() => startObjection(res)} className="mt-2 w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium rounded-xl transition-colors border border-neutral-700 hover:border-neutral-500 flex items-center justify-center">
-                        <AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> 
-                        {res.isValid ? 'Haksız Puan Aldıysa İtiraz Et' : 'Geçerli Olduğuna İtiraz Et'}
-                      </button>
-                    </motion.div>
-                  ))}
+                        <div className="flex justify-between items-start z-0">
+                           <div className="flex items-center gap-2 text-sm text-neutral-400 mb-2">
+                             <User className="w-4 h-4" /> {res.username}
+                           </div>
+                           <div className="flex items-center bg-neutral-900/50 px-3 py-1 rounded-lg border border-neutral-800">
+                              <span className={`font-black text-lg ${res.points > 0 ? 'text-green-400' : 'text-neutral-500 line-through'}`}>+{res.points}</span>
+                           </div>
+                        </div>
+                        
+                        <div className={`flex items-start gap-3 z-0 ${res._revoked ? 'opacity-50' : ''}`}>
+                          {res.isValid ? <CheckCircle className="w-6 h-6 text-green-500 mt-1" /> : <XCircle className="w-6 h-6 text-red-500 mt-1" />}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-bold text-neutral-500 uppercase">{res.category}:</span>
+                              <span className={`text-lg font-bold text-white break-all ${res._revoked ? 'line-through text-neutral-500' : ''}`}>{res.answer}</span>
+                            </div>
+                            <p className="text-xs text-neutral-400 leading-relaxed">{res.reasoning}</p>
+                          </div>
+                        </div>
+
+                        {!isDone && (
+                          <div className="mt-4 pt-4 border-t border-white/5 z-0">
+                            {res.isValid ? (
+                              <>
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                  {obs.map(o => (
+                                    <span key={o.id} className="text-xs bg-red-900/30 text-red-400 border border-red-900/50 px-2 py-1 rounded-md flex items-center">
+                                      <UserMinus className="w-3 h-3 mr-1" /> {o.username}
+                                    </span>
+                                  ))}
+                                </div>
+                                {res.profileId !== currentUser?.id && (
+                                  <button onClick={() => handleObject(res)} disabled={obs.some((o:any) => o.id === currentUser?.id)} className="w-full py-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed text-neutral-300 text-sm font-medium rounded-xl transition-colors border border-neutral-700 hover:border-neutral-500 flex items-center justify-center">
+                                    <AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> Haksız Puan: İtiraz Et
+                                  </button>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex flex-wrap gap-2 mb-3">
+                                  {vers.map(v => (
+                                    <span key={v.id} className="text-xs bg-green-900/30 text-green-400 border border-green-900/50 px-2 py-1 rounded-md flex items-center">
+                                      <UserCheck className="w-3 h-3 mr-1" /> {v.username}
+                                    </span>
+                                  ))}
+                                </div>
+                                {res.profileId !== currentUser?.id && (
+                                  <button onClick={() => handleVerify(res)} disabled={vers.some((v:any) => v.id === currentUser?.id)} className="w-full py-2 bg-neutral-800 hover:bg-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed text-neutral-300 text-sm font-medium rounded-xl transition-colors border border-neutral-700 hover:border-neutral-500 flex items-center justify-center">
+                                    <CheckCircle className="w-4 h-4 mr-2 text-green-500" /> Doğrula / Puan Ver
+                                  </button>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        )}
+                      </motion.div>
+                    )
+                  })}
                 </div>
               </div>
             ))
@@ -271,39 +371,6 @@ export default function ResultsPage() {
           )}
         </div>
       </motion.div>
-
-      {/* Oylama Modalı */}
-      <AnimatePresence>
-        {activeObjection && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-            <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-neutral-900 border border-neutral-700 p-8 rounded-3xl max-w-md w-full shadow-2xl text-center">
-               <AlertTriangle className="w-16 h-16 text-yellow-500 mx-auto mb-4" />
-               <h2 className="text-2xl font-black text-white mb-2">İtiraz Oylaması</h2>
-               <p className="text-neutral-300 mb-6">
-                 <strong className="text-white">{activeObjection.username}</strong> isimli oyuncunun 
-                 <strong className="text-blue-400"> {activeObjection.category} </strong> kategorisindeki 
-                 <strong className="text-white text-lg"> &quot;{activeObjection.answer}&quot; </strong> cevabı sence 
-                 {activeObjection.isValid ? ' HAKSIZ YERE Mİ KABUL EDİLMİŞ? PUANI SİLİNSİN Mİ?' : ' DOĞRU MU? KABUL EDİLSİN Mİ?'}
-               </p>
-
-               <div className="flex justify-center gap-4 mb-8">
-                 <button onClick={() => castVote(true)} className={`flex-1 py-4 rounded-2xl font-bold flex items-center justify-center transition-all ${votes[currentUser?.id] === true ? 'bg-green-600 text-white ring-4 ring-green-600/30' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}>
-                   <ThumbsUp className="w-5 h-5 mr-2" /> Evet
-                 </button>
-                 <button onClick={() => castVote(false)} className={`flex-1 py-4 rounded-2xl font-bold flex items-center justify-center transition-all ${votes[currentUser?.id] === false ? 'bg-red-600 text-white ring-4 ring-red-600/30' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}>
-                   <ThumbsDown className="w-5 h-5 mr-2" /> Hayır
-                 </button>
-               </div>
-
-               <div className="flex items-center justify-between text-sm font-medium px-4">
-                 <div className="text-green-400">Evet: {Object.values(votes).filter(v => v).length}</div>
-                 <div className="text-yellow-500 text-2xl">{objectionTimer} sn</div>
-                 <div className="text-red-400">Hayır: {Object.values(votes).filter(v => !v).length}</div>
-               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   )
 }
