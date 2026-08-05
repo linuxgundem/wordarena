@@ -123,14 +123,22 @@ export default function ResultsPage() {
         const no = Object.values(votes).filter(v => !v).length
         
         if (yes > no) {
-           toast.success('İtiraz kabul edildi! Puanlar güncelleniyor...')
-           // Puanları veritabanında düzelt
-           await supabase.from('answer_reviews').update({ is_valid: true, points_awarded: 10 }).eq('answer_id', activeObjection.id)
-           
-           // Score güncellemesi (mevcut puanı artır)
-           const { data: scoreData } = await supabase.from('scores').select('total_score').eq('game_id', game.id).eq('profile_id', activeObjection.profileId).maybeSingle()
-           if (scoreData) {
-              await supabase.from('scores').update({ total_score: scoreData.total_score + 10 }).eq('game_id', game.id).eq('profile_id', activeObjection.profileId)
+           if (!activeObjection.isValid) {
+             toast.success('İtiraz kabul edildi! Puanlar düzeltiliyor...')
+             await supabase.from('answer_reviews').update({ is_valid: true, points_awarded: 10 }).eq('answer_id', activeObjection.id)
+             
+             const { data: scoreData } = await supabase.from('scores').select('total_score').eq('game_id', game.id).eq('profile_id', activeObjection.profileId).maybeSingle()
+             if (scoreData) {
+                await supabase.from('scores').update({ total_score: scoreData.total_score + 10 }).eq('game_id', game.id).eq('profile_id', activeObjection.profileId)
+             }
+           } else {
+             toast.success('İtiraz kabul edildi! Hatalı verilen puan geri alınıyor...')
+             await supabase.from('answer_reviews').update({ is_valid: false, points_awarded: 0 }).eq('answer_id', activeObjection.id)
+             
+             const { data: scoreData } = await supabase.from('scores').select('total_score').eq('game_id', game.id).eq('profile_id', activeObjection.profileId).maybeSingle()
+             if (scoreData) {
+                await supabase.from('scores').update({ total_score: Math.max(0, scoreData.total_score - activeObjection.points) }).eq('game_id', game.id).eq('profile_id', activeObjection.profileId)
+             }
            }
         } else {
            toast.error('İtiraz oy çokluğuyla reddedildi.')
@@ -224,11 +232,10 @@ export default function ResultsPage() {
                   </div>
                 </div>
 
-                {!res.isValid && res.points === 0 && (
-                  <button onClick={() => startObjection(res)} className="mt-2 w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium rounded-xl transition-colors border border-neutral-700 hover:border-neutral-500 flex items-center justify-center">
-                    <AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> İtiraz Et / Oylama Başlat
-                  </button>
-                )}
+                <button onClick={() => startObjection(res)} className="mt-2 w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium rounded-xl transition-colors border border-neutral-700 hover:border-neutral-500 flex items-center justify-center">
+                  <AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> 
+                  {res.isValid ? 'Haksız Puan Aldıysa İtiraz Et' : 'Geçerli Olduğuna İtiraz Et'}
+                </button>
               </motion.div>
             ))
           )}
@@ -258,15 +265,16 @@ export default function ResultsPage() {
                <p className="text-neutral-300 mb-6">
                  <strong className="text-white">{activeObjection.username}</strong> isimli oyuncunun 
                  <strong className="text-blue-400"> {activeObjection.category} </strong> kategorisindeki 
-                 <strong className="text-white text-lg"> &quot;{activeObjection.answer}&quot; </strong> cevabı sence doğru mu?
+                 <strong className="text-white text-lg"> &quot;{activeObjection.answer}&quot; </strong> cevabı sence 
+                 {activeObjection.isValid ? ' HAKSIZ YERE Mİ KABUL EDİLMİŞ? PUANI SİLİNSİN Mİ?' : ' DOĞRU MU? KABUL EDİLSİN Mİ?'}
                </p>
 
                <div className="flex justify-center gap-4 mb-8">
                  <button onClick={() => castVote(true)} className={`flex-1 py-4 rounded-2xl font-bold flex items-center justify-center transition-all ${votes[currentUser?.id] === true ? 'bg-green-600 text-white ring-4 ring-green-600/30' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}>
-                   <ThumbsUp className="w-5 h-5 mr-2" /> Evet (Kabul)
+                   <ThumbsUp className="w-5 h-5 mr-2" /> Evet
                  </button>
                  <button onClick={() => castVote(false)} className={`flex-1 py-4 rounded-2xl font-bold flex items-center justify-center transition-all ${votes[currentUser?.id] === false ? 'bg-red-600 text-white ring-4 ring-red-600/30' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'}`}>
-                   <ThumbsDown className="w-5 h-5 mr-2" /> Hayır (Red)
+                   <ThumbsDown className="w-5 h-5 mr-2" /> Hayır
                  </button>
                </div>
 
