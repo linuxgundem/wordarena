@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -183,6 +183,14 @@ export default function ResultsPage() {
     }
   }
 
+  const groupedResults = useMemo(() => {
+    return results.reduce((acc: any, res: any) => {
+      if (!acc[res.category]) acc[res.category] = []
+      acc[res.category].push(res)
+      return acc
+    }, {})
+  }, [results])
+
   if (loading) return <div className="min-h-screen bg-neutral-950 flex items-center justify-center text-white">Sonuçlar yükleniyor...</div>
 
   const isOwner = room?.owner_id === currentUser?.id
@@ -204,39 +212,48 @@ export default function ResultsPage() {
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-12">
+        <div className="flex flex-col gap-8 mb-12">
           {results.length === 0 ? (
-            <div className="col-span-full text-center p-8 bg-neutral-900/50 rounded-2xl border border-neutral-800 text-neutral-400">
+            <div className="text-center p-8 bg-neutral-900/50 rounded-2xl border border-neutral-800 text-neutral-400">
               Bu tur hiç cevap gönderilmedi.
             </div>
           ) : (
-            results.map((res, index) => (
-              <motion.div key={res.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: index * 0.05 }} className={`p-5 rounded-2xl border backdrop-blur-sm flex flex-col justify-between gap-3 ${res.isValid ? 'bg-blue-900/10 border-blue-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
-                <div className="flex justify-between items-start">
-                   <div className="flex items-center gap-2 text-sm text-neutral-400 mb-2">
-                     <User className="w-4 h-4" /> {res.username}
-                   </div>
-                   <div className="flex items-center bg-neutral-900/50 px-3 py-1 rounded-lg border border-neutral-800">
-                      <span className={`font-black text-lg ${res.points > 0 ? 'text-green-400' : 'text-red-400'}`}>+{res.points}</span>
-                   </div>
-                </div>
-                
-                <div className="flex items-start gap-3">
-                  {res.isValid ? <CheckCircle className="w-6 h-6 text-green-500 mt-1" /> : <XCircle className="w-6 h-6 text-red-500 mt-1" />}
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-bold text-neutral-500 uppercase">{res.category}:</span>
-                      <span className="text-lg font-bold text-white break-all">{res.answer}</span>
-                    </div>
-                    <p className="text-xs text-neutral-400 leading-relaxed">{res.reasoning}</p>
-                  </div>
-                </div>
+            Object.entries(groupedResults).map(([categoryName, categoryResults]: any) => (
+              <div key={categoryName} className="bg-neutral-900/30 rounded-3xl p-6 border border-neutral-800/50 shadow-xl">
+                <h2 className="text-2xl font-black text-blue-400 mb-6 uppercase tracking-widest border-b border-blue-900/30 pb-4 flex items-center">
+                  Kategori: {categoryName}
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {categoryResults.map((res: any, index: number) => (
+                    <motion.div key={res.id} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: index * 0.05 }} className={`p-5 rounded-2xl border backdrop-blur-sm flex flex-col justify-between gap-3 ${res.isValid ? 'bg-blue-900/10 border-blue-900/30' : 'bg-red-900/10 border-red-900/30'}`}>
+                      <div className="flex justify-between items-start">
+                         <div className="flex items-center gap-2 text-sm text-neutral-400 mb-2">
+                           <User className="w-4 h-4" /> {res.username}
+                         </div>
+                         <div className="flex items-center bg-neutral-900/50 px-3 py-1 rounded-lg border border-neutral-800">
+                            <span className={`font-black text-lg ${res.points > 0 ? 'text-green-400' : 'text-red-400'}`}>+{res.points}</span>
+                         </div>
+                      </div>
+                      
+                      <div className="flex items-start gap-3">
+                        {res.isValid ? <CheckCircle className="w-6 h-6 text-green-500 mt-1" /> : <XCircle className="w-6 h-6 text-red-500 mt-1" />}
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-bold text-neutral-500 uppercase">{res.category}:</span>
+                            <span className="text-lg font-bold text-white break-all">{res.answer}</span>
+                          </div>
+                          <p className="text-xs text-neutral-400 leading-relaxed">{res.reasoning}</p>
+                        </div>
+                      </div>
 
-                <button onClick={() => startObjection(res)} className="mt-2 w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium rounded-xl transition-colors border border-neutral-700 hover:border-neutral-500 flex items-center justify-center">
-                  <AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> 
-                  {res.isValid ? 'Haksız Puan Aldıysa İtiraz Et' : 'Geçerli Olduğuna İtiraz Et'}
-                </button>
-              </motion.div>
+                      <button onClick={() => startObjection(res)} className="mt-2 w-full py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-medium rounded-xl transition-colors border border-neutral-700 hover:border-neutral-500 flex items-center justify-center">
+                        <AlertTriangle className="w-4 h-4 mr-2 text-yellow-500" /> 
+                        {res.isValid ? 'Haksız Puan Aldıysa İtiraz Et' : 'Geçerli Olduğuna İtiraz Et'}
+                      </button>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
             ))
           )}
         </div>
