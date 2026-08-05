@@ -244,6 +244,12 @@ export default function GamePage() {
           event: 'player_submitted',
           payload: { profileId: currentUser.id }
         })
+        
+        // Kendi listeme de ekleyeyim (broadcast kendini tetiklemez)
+        setSubmittedPlayers(prev => {
+           if (prev.includes(currentUser.id)) return prev
+           return [...prev, currentUser.id]
+        })
       }
       
     } catch(err: any) {
