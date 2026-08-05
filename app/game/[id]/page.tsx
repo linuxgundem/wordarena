@@ -17,8 +17,8 @@ export default function GamePage() {
   const containerRef = useRef<HTMLDivElement>(null)
   
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const [countdown, setCountdown] = useState(5)
   const [gameState, setGameState] = useState<'starting' | 'playing' | 'submitting' | 'evaluating'>('starting')
+  const [countdown, setCountdown] = useState(5)
   const [timeLeft, setTimeLeft] = useState(60)
   
   const [room, setRoom] = useState<any>(null)
@@ -181,7 +181,7 @@ export default function GamePage() {
 
       setGameState('evaluating')
       
-      // If Host, trigger evaluation API
+      // If Host, trigger evaluation API but give a solid grace period for slow connections
       if (room && currentUser && room.owner_id === currentUser.id) {
         setTimeout(async () => {
           try {
@@ -193,35 +193,45 @@ export default function GamePage() {
           } catch (err: any) {
              toast.error('Değerlendirme hatası: ' + err.message)
           }
-        }, 3000)
+        }, 6000) // 6 saniye bekle ki diğer oyuncular verilerini kesin kaydetsin
       }
     } catch(err: any) {
       toast.error(err.message)
     }
   }, [gameState, round, answers, room, currentUser])
 
-  // Oyun Döngüsü
+  // Oyun Döngüsü (Sunucu saatine göre tam senkronize)
   useEffect(() => {
-    if (!round) return
+    if (!round || !room || gameState === 'submitting' || gameState === 'evaluating') return
 
-    if (gameState === 'starting') {
-      if (countdown > 0) {
-        const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
-        return () => clearTimeout(timer)
-      } else {
+    // created_at bilgisini milisaniye cinsine çevir
+    const serverStartTime = new Date(round.created_at).getTime()
+    const gameDurationMs = room.round_time * 1000
+    const startDelayMs = 5000 // 5 saniye bekleme
+    
+    const interval = setInterval(() => {
+      const now = Date.now()
+      
+      // 1. Bekleme Süresi (Starting)
+      if (now < serverStartTime + startDelayMs) {
+        setGameState('starting')
+        setCountdown(Math.ceil((serverStartTime + startDelayMs - now) / 1000))
+      } 
+      // 2. Oyun Süresi (Playing)
+      else if (now < serverStartTime + startDelayMs + gameDurationMs) {
         setGameState('playing')
-      }
-    }
-
-    if (gameState === 'playing') {
-      if (timeLeft > 0) {
-        const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000)
-        return () => clearTimeout(timer)
-      } else {
+        setTimeLeft(Math.ceil((serverStartTime + startDelayMs + gameDurationMs - now) / 1000))
+      } 
+      // 3. Süre Bitti (Submitting)
+      else {
+        clearInterval(interval)
+        setTimeLeft(0)
         submitData()
       }
-    }
-  }, [countdown, gameState, timeLeft, round, submitData])
+    }, 500)
+
+    return () => clearInterval(interval)
+  }, [round, room, gameState, submitData])
 
   const handleInputChange = (category: string, value: string) => {
     setAnswers(prev => ({
