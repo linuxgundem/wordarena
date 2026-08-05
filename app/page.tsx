@@ -4,12 +4,21 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { Plus, LogIn, Dices, Trophy, User, Settings, ArrowRight } from 'lucide-react'
+import { Plus, LogIn, Dices, Trophy, User, Settings, ArrowRight, LogOut } from 'lucide-react'
 import RoomConfigModal from '@/components/RoomConfigModal'
+import { createClient } from '@/lib/supabase/client'
+import toast from 'react-hot-toast'
 
 export default function HomePage() {
   const router = useRouter()
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false)
+
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    toast.success('Çıkış yapıldı')
+    router.push('/login')
+  }
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 w-full px-4 relative z-10 py-12">
@@ -73,7 +82,7 @@ export default function HomePage() {
         </div>
 
         {/* Alt Menü */}
-        <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="mt-8 grid grid-cols-2 md:grid-cols-5 gap-4">
           <Link href="/random" className="flex items-center justify-center p-4 bg-neutral-900/40 border border-neutral-800 rounded-2xl hover:bg-neutral-800 transition-colors text-neutral-300 hover:text-white">
             <Dices className="w-5 h-5 mr-3" /> Rastgele Oyun
           </Link>
@@ -86,6 +95,9 @@ export default function HomePage() {
           <Link href="/settings" className="flex items-center justify-center p-4 bg-neutral-900/40 border border-neutral-800 rounded-2xl hover:bg-neutral-800 transition-colors text-neutral-300 hover:text-white">
             <Settings className="w-5 h-5 mr-3" /> Ayarlar
           </Link>
+          <button onClick={handleLogout} className="flex items-center justify-center p-4 bg-red-900/10 border border-red-900/30 rounded-2xl hover:bg-red-900/30 transition-colors text-red-400 hover:text-red-300">
+            <LogOut className="w-5 h-5 mr-3" /> Çıkış Yap
+          </button>
         </div>
       </motion.div>
 
